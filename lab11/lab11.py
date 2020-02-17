@@ -20,35 +20,32 @@ DELAY_MS = 50
 X_CHANGE_REDRAW_COEF = 500  # 0.000000001  # 500
 
 # Ввод данных
-# st, en = None, None
-# while True:
-#     try:
-#         st, en = map(float, input('Введите начало и конец отрезка: ').split())
-#         if en > st:
-#             break
-#         else:
-#             print('Конец должен быть больше начала!')
-#     except Exception:
-#         print('Ошибка ввода!')
-# div = None
-# while True:
-#     try:
-#         div = int(input('Введите кол-во разбиений: '))
-#         break
-#     except Exception:
-#         print('Ошибка ввода!')
-#
-# eps = None
-# while True:
-#     try:
-#         eps = float(input('Введите точность eps: '))
-#         break
-#     except Exception:
-#         print('Ошибка ввода!')
+st, en = None, None
+while True:
+    try:
+        st, en = map(float, input('Введите начало и конец отрезка: ').split())
+        if en > st:
+            break
+        else:
+            print('Конец должен быть больше начала!')
+    except Exception:
+        print('Ошибка ввода!')
+div = None
+while True:
+    try:
+        div = int(input('Введите кол-во разбиений: '))
+        break
+    except Exception:
+        print('Ошибка ввода!')
 
-st, en = -0.8, 1
-eps = 0.00000001
-div = 5
+eps = None
+while True:
+    try:
+        eps = float(input('Введите точность eps: '))
+        break
+    except Exception:
+        print('Ошибка ввода!')
+
 ITER_LIMIT = 10_000  # Ограничение по числу итераций.
 DELTA_THRESHOLD = (en - st) / X_CHANGE_REDRAW_COEF  # Изменение x при котором вызывается перерисовка.
 lin_x = np.linspace(st, en, 400)  # Множество точек для построения графика.
@@ -116,13 +113,11 @@ class App(Tk):
         self.ax.axhline(0, color='black')
 
         self.fagg = FigureCanvasTkAgg(fig, self)
-        self.fagg.get_tk_widget().grid(row=0, column=0)
-        # self.fagg.get_tk_widget().pack(fill=BOTH, expand=1)
+        self.fagg.get_tk_widget().pack(fill=BOTH, expand=1)
         self.fagg.draw()
 
-        Button(self, text='start', command=self.next_step).grid(row=1, column=0)
+        Button(self, text='start', command=self.next_step).pack()
 
-        # Button(self, text='12312123').pack(side=LEFT)
 
 
     # Следующий шаг поиска корня.
