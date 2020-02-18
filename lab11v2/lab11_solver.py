@@ -3,12 +3,14 @@ from typing import Tuple, Callable
 
 Lin = namedtuple('Lin', 'k b')
 Point = namedtuple('Point', 'x y')
+Solution = namedtuple('Solution', ['interval', 'x', 'y', 'iter', 'err'])
 
 
 def points_to_hord(a: Tuple[float, float], b: Tuple[float, float]) -> Lin:
-    if abs(b[0] - a[0]) < 1e-308:
+    if abs(b[0] - a[0]) < 1e-300:
         raise ZeroDivisionError()
-    k = (b[1] - a[1]) / (b[0] - a[0])
+    else:
+        k = (b[1] - a[1]) / (b[0] - a[0])
     b = a[1] - k * a[0]
     return Lin(k, b)
 
@@ -32,6 +34,7 @@ class HordEquationSolver:
     p1: Point
 
     iter_count: int
+    err: int = 0
 
     f: Callable
 
@@ -44,6 +47,7 @@ class HordEquationSolver:
         self.segment = 0
         self.delta_acc = 0
         self.iter_count = 0
+        self.err = 0
         self.p1 = Point(self.st, self.f(self.st))
         self.p_fixed = Point(self.en, self.f(self.en))
         self.hord = points_to_hord(self.p1, self.p_fixed)
@@ -64,13 +68,18 @@ class HordEquationSolver:
             if y1 * self.p_fixed.y > 0:
                 self.p_fixed, self.p1 = self.p1, self.p_fixed
             self.p1 = Point(x1, y1)
-            self.hord = points_to_hord(self.p1, self.p_fixed)
+            try:
+                self.hord = points_to_hord(self.p1, self.p_fixed)
+            except ZeroDivisionError:
+                self.err = -1
+                return True
             self.delta_acc += delta
             self.iter_count += 1
-            if delta < self.eps:
+            if abs(y1) < self.eps:
                 return True
 
             if self.iter_count > self.ITER_LIMIT:
+                self.err = -2
                 return True
 
             if self.delta_acc > self.DELTA_THRESHOLD:
@@ -80,6 +89,7 @@ class HordEquationSolver:
         self.segment += 1
         while self.segment <= self.div:
             self.iter_count = 0
+            self.err = 0
             step = (self.en - self.st)/self.div
             x1 = self.st + step * (self.segment - 1)
             x2 = self.st + step * self.segment
@@ -98,3 +108,15 @@ class HordEquationSolver:
         self.done = True
         return True
 
+    def get_current_segment(self):
+        step = (self.en - self.st) / self.div
+        return self.st + step * (self.segment - 1), self.st + step * self.segment
+
+    def get_solution(self) -> Solution:
+        return Solution(
+            interval=self.get_current_segment(),
+            x=self.p1.x,
+            y=self.p1.y,
+            iter=self.iter_count,
+            err=self.err
+        )

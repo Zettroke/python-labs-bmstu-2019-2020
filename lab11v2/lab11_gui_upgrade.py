@@ -4,25 +4,21 @@
 # с определённым шагом разбиений методом хорд и выводит таблицу корней.
 import traceback
 from tkinter.ttk import Treeview
-from typing import Any, Callable, List
+from typing import Callable, List
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from tkinter import Tk, Button, Frame, Entry, Label, StringVar, DoubleVar, IntVar, Scale, HORIZONTAL
-from collections import namedtuple
+from tkinter import Tk, Button, Frame, Entry, Label, StringVar, DoubleVar, IntVar, Scale, HORIZONTAL, Checkbutton
 
 from matplotlib.lines import Line2D
 
-from lab11v2.lab11_solver import HordEquationSolver
-
-Lin = namedtuple('Lin', 'k b')
-Point = namedtuple('Point', 'x y')
+from lab11v2.lab11_solver import HordEquationSolver, Solution
+import math
 
 DELAY_MS = 50
 X_CHANGE_REDRAW_COEF = 500  # 0.000000001  # 500
 
-# g_st, g_en = 0, 1
 g_st, g_en = -10, 10
 g_eps = 0.00000001
 g_div = 9
@@ -30,6 +26,7 @@ ITER_LIMIT = 10_000  # Ограничение по числу итераций.
 DELTA_THRESHOLD = (g_en - g_st) / X_CHANGE_REDRAW_COEF  # Изменение x при котором вызывается перерисовка.
 # DEFAULT_EXPRESSION = '8*x**4-5*(x-0.1)+1'
 DEFAULT_EXPRESSION = 'np.sin(x)'
+LOG_BASE = 5
 
 
 # Класс оборачивающий метод и следящий за тем что бы внутренний метод не вызывался чаще через t миллисекунд
@@ -48,15 +45,15 @@ class Debouncer:
         if self.last_job_id:
             self.tk.after_cancel(self.last_job_id)
         else:
-            self.func(*args)
+            self.func(*args, **kwargs)
         self.last_job_id = self.tk.after(self.t, self.func, *args)
 
 
 class App(Tk):
-    STEP_MODE = False  # Пошаговое проигрывание анимации.
+    STEP_MODE: IntVar  # Пошаговое проигрывание анимации.
 
     started = False  # Мы начали искать корни, в это время нельзя менять менять уравнение.
-    paused = False
+    paused = False  # Пауза для анимации.
     done: bool = False
     st: float
     en: float
@@ -64,30 +61,33 @@ class App(Tk):
     eps: float
 
     lin_x: any  # Множество точек для построения графика.
-    lin_space_size: int = 400
+    lin_space_size: int = 400  # Кол-во точек для построения графика
 
     solver: HordEquationSolver
 
-    f: Callable[[Any], float]
+    expr: StringVar  # Введенное пользователем выражение
 
     # График
     ax: plt.Axes
     plots: List[Line2D] = []
-    h_lines: List[Line2D] = []
+    h_lines: List[Line2D] = []  # Горизонтальные линии
     main_plot: any = None
 
-    solutions: List = []
+    # Список решений
+    solutions: List[Solution] = []
+    solution_ids: List[str] = []
 
-    tree: Treeview
-    b_start: Button
+    tree: Treeview  # Таблица результатов
+    b_start: Button  # Кнопка начала/остановки
+    lin_space_label: Label  # Надпись о точности графика
 
-    cached_function: any
+    cached_function: any  # Декодированная функция, что бы каждый раз не вызывать eval
+    after_job_id: any = None  # id отложенного вызова функции для её отмены
 
     def f(self, x):
         return self.cached_function(x)
 
     def __init__(self, st: float, en: float, div: int, eps: float):
-        step = (en-st)/div
         super().__init__()
         self.st = st
         self.en = en
@@ -105,7 +105,7 @@ class App(Tk):
         self.grid_rowconfigure(0, weight=1)
         self.fagg = FigureCanvasTkAgg(fig, self)
         self.fagg.get_tk_widget().grid(row=0, column=0, sticky='WNSE')
-        self.frame = Frame(self, background='green')
+        self.frame = Frame(self)
         self.frame.grid(row=0, column=1, sticky='WNSE', rowspan=2)
 
         self.init_sidebar()
@@ -114,16 +114,13 @@ class App(Tk):
 
         self.prepare()
 
-        # self.fagg.get_tk_widget().pack(fill=BOTH, expand=1)
         self.fagg.draw()
-        button_frame = Frame(self, bg='blue')
+        button_frame = Frame(self)
         button_frame.grid(row=1, column=0, sticky='WE')
         self.b_start = Button(button_frame, text='start')
         self.b_start.pack(side='left', anchor='center')
         self.b_start.bind('<Button>', self.start)
         Button(button_frame, text='reset', command=self.reset).pack(side='left', anchor='center')
-
-        # Button(self, text='12312123').pack(side=LEFT)
 
     def init_sidebar(self):
         self.cached_function = eval('lambda x: ' + DEFAULT_EXPRESSION)
@@ -131,11 +128,12 @@ class App(Tk):
         self.expr.set(DEFAULT_EXPRESSION)
         self.expr.trace_variable('w', self.var_debounce(self.expression_input))
 
+        # Динамические переменные для входных полей
         start_v = DoubleVar(self, value=self.st)
         end = DoubleVar(self, value=self.en)
         epsilon = DoubleVar(self, value=self.eps)
         divs = IntVar(self, value=self.div)
-        lin_space_var = IntVar(self, value=self.lin_space_size)
+        lin_space_var = DoubleVar(self, value=math.log(self.lin_space_size, LOG_BASE))
         variables = (
             (start_v, 'st'),
             (end, 'en'),
@@ -143,6 +141,7 @@ class App(Tk):
             (divs, 'div')
         )
 
+        # Функция обертка для сигнализирования о смене переменной.
         def outer(var, var_name):
             def inner(*_args):
                 try:
@@ -153,7 +152,9 @@ class App(Tk):
 
         for (v, name) in variables:
             v.trace('w', self.debounce(outer(v, name), 250))
-        lin_space_var.trace('w', self.debounce(lambda *_args: self.modify_lin_space_size(lin_space_var.get()), 250))
+
+        lin_debouncer = self.debounce(self.modify_lin_space_size, 150)
+        lin_space_var.trace('w', lambda *_args: self.modify_lin_space_size_callback(lin_space_var.get(), lin_debouncer))
 
         self.frame.columnconfigure(1, weight=2)
         Label(self.frame, text='Выражение:').grid(column=0, row=0, columnspan=2, sticky='EW')
@@ -172,24 +173,38 @@ class App(Tk):
         Label(self.frame, text='Разделение').grid(column=0, row=6, sticky='W')
         Entry(self.frame, textvariable=divs).grid(column=1, row=6, sticky='EW')
 
-        w = Scale(self.frame, from_=1, to=400, orient=HORIZONTAL, variable=lin_space_var)
-        w.grid(column=0, row=7, columnspan=2, sticky='EW')
+        self.frame.rowconfigure(7, minsize=25)
+        self.lin_space_label = Label(self.frame, text=f'lin_space_size: {self.lin_space_size}')
+        self.lin_space_label.grid(column=0, row=8, columnspan=2, sticky='W')
+        w = Scale(self.frame, from_=math.log(5, LOG_BASE), to=math.log(1000, LOG_BASE), resolution=0.1/LOG_BASE, orient=HORIZONTAL, variable=lin_space_var)
+        w.grid(column=0, row=9, columnspan=2, sticky='EW')
 
         self.tree = Treeview(self.frame)
-        self.tree['columns'] = (1, 2, 3)
-        self.tree.column('#0', width=25)
-        self.tree.column(1, width=80, anchor='center')
+        self.tree['columns'] = (1, 2, 3, 4, 5)
+        self.tree.column('#0', width=35)
+        self.tree.column(1, width=130, anchor='center')
         self.tree.column(2, width=80, anchor='center')
         self.tree.column(3, width=80, anchor='center')
+        self.tree.column(4, width=80, anchor='center')
+        self.tree.column(5, width=80, anchor='center')
         self.tree.heading('#0', text='№')
-        self.tree.heading(1, text='x')
-        self.tree.heading(2, text='y')
-        self.tree.heading(3, text='iter')
+        self.tree.heading(1, text='Интервал')
+        self.tree.heading(2, text='Корень')
+        self.tree.heading(3, text='Значение')
+        self.tree.heading(4, text='Итераций')
+        self.tree.heading(5, text='Ошибка')
 
-        self.tree.grid(column=0, row=7, columnspan=2, sticky='EWSN')
+        self.tree.grid(column=0, row=10, columnspan=2, sticky='EWSN')
+
+        self.STEP_MODE = IntVar(self, value=0)
+        Checkbutton(self.frame, text='Пошаговый режим', variable=self.STEP_MODE).grid(column=0, row=11, sticky='WS')
+
+    def modify_lin_space_size_callback(self, value, callback):
+        self.lin_space_label.configure(text=f'lin_space_size: {round(LOG_BASE**value)}')
+        callback(value)
 
     def modify_lin_space_size(self, size):
-        self.lin_space_size = size
+        self.lin_space_size = round(LOG_BASE**size)
         self.redraw_main_plot(True)
 
     def redraw_main_plot(self, draw=False):
@@ -199,12 +214,13 @@ class App(Tk):
         if self.main_plot:
             self.main_plot.remove()
         v = self.f(self.lin_x)
-        self.main_plot = self.ax.plot(self.lin_x, v, label='f(x)')[0]
+        self.main_plot = self.ax.plot(self.lin_x, v, label='f(x)', color='tab:blue')[0]
         mx_y = max(v)
         mn_y = min(v)
         m = (mx_y - mn_y) / 50
+        dx = abs(self.en - self.st)*0.05
         self.ax.set_ylim(mn_y - m, mx_y + m)
-        self.ax.set_xlim(self.st, self.en)
+        self.ax.set_xlim(self.st-dx, self.en+dx)
         if draw:
             self.fagg.draw()
 
@@ -228,11 +244,10 @@ class App(Tk):
             )
 
         self.plots = [
-            self.ax.plot(self.lin_x, self.solver.hord.k * self.lin_x + self.solver.hord.b, label='lin')[0],
+            self.ax.plot(self.lin_x, self.solver.hord.k * self.lin_x + self.solver.hord.b, label='lin', color='tab:orange')[0],
             self.ax.scatter([self.solver.p1.x], [self.solver.p1.y], marker='o', color='red'),
             self.ax.scatter([self.solver.p_fixed.x], [self.solver.p_fixed.y], marker='o', color='blue')
         ]
-        # self.ax.autoscale(axis='x')
         self.fagg.draw()
 
     def var_debounce(self, func: Callable[[str], None], t: int = 500) -> Callable:
@@ -249,32 +264,38 @@ class App(Tk):
             self.reset()
         except Exception:
             pass
-        print(value)
 
     def params_input(self, value, var_name):
         self.__setattr__(var_name, value)
         self.reset()
-        print(value, var_name)
 
     def reset(self):
+        self.after_cancel(self.after_job_id)
         self.started = False
         self.done = False
-        self.tree.delete(*self.solutions)
+        self.tree.delete(*self.solution_ids)
         self.solutions.clear()
+        self.solution_ids.clear()
         self.solver = HordEquationSolver(self.st, self.en, self.div, self.eps, self.f)
         self.b_start.configure(text='start')
         self.b_start.bind('<Button>', self.start)
         self.prepare()
 
     def start(self, event):
-        self.started = True
-        self.paused = False
-        event.widget.configure(text='stop')
-        event.widget.bind('<Button>', self.stop)
-        self.step_solve()
+        if self.STEP_MODE.get():
+            self.step_solve()
+        else:
+            if not self.started or self.paused:
+                self.started = True
+                self.paused = False
+                self.step_solve()
+                event.widget.configure(text='stop')
+                event.widget.bind('<Button>', self.stop)
 
     def stop(self, event):
         self.paused = True
+        if self.after_job_id:
+            self.after_cancel(self.after_job_id)
         event.widget.configure(text='start')
         event.widget.bind('<Button>', self.start)
 
@@ -283,7 +304,7 @@ class App(Tk):
         for pt in self.plots:
             pt.remove()
         self.plots = [
-            self.ax.plot(self.lin_x, self.solver.hord.k * self.lin_x + self.solver.hord.b, label='lin', color='orange')[0],
+            self.ax.plot(self.lin_x, self.solver.hord.k * self.lin_x + self.solver.hord.b, label='lin', color='tab:orange')[0],
             self.ax.scatter([self.solver.p1.x], [self.solver.p1.y], marker='o', color='red'),
             self.ax.scatter([self.solver.p_fixed.x], [self.solver.p_fixed.y], marker='o', color='blue')
         ]
@@ -291,22 +312,36 @@ class App(Tk):
         self.ax.relim()
 
     def step_solve(self):
-        if self.started and not self.solver.done:
+        if self.started and not self.solver.done or self.STEP_MODE.get():
             status = self.solver.next_step()
+            self.redraw_solution()
             if not status:
-                self.redraw_solution()
-                if self.started and not self.paused and not self.STEP_MODE:
-                    self.after(100, self.step_solve)
+                if self.started and not self.paused and not self.STEP_MODE.get():
+                    self.after_job_id = self.after(100, self.step_solve)
             else:
-                sol = (self.solver.p1.x, self.solver.p1.y, self.solver.iter_count)
-                id = self.tree.insert('', 'end', 'iid' + str(len(self.solutions)), text=str(len(self.solutions)+1), values=sol)
-                self.solutions.append(id)
+                self.add_solution(self.solver.get_solution())
                 if self.solver.next_segment():
                     print('DONE!!!!')
                     self.b_start.configure(text='DONE!!!!')
+                    self.b_start.unbind('<Button>')
                 else:
-                    if not self.STEP_MODE:
-                        self.after(200, self.step_solve)
+                    self.redraw_solution()
+                    if not self.STEP_MODE.get():
+                        self.after_job_id = self.after(200, self.step_solve)
+
+    def add_solution(self, sol):
+        if sol.err == 0:
+            interval = f'({sol.interval[0]:.5} : {sol.interval[1]:.5})'
+            iid = self.tree.insert(
+                '',
+                'end',
+                text=str(len(self.solutions)+1),
+                values=(interval, f'{sol.x:.7}', f'{sol.y:.5}', sol.iter, sol.err)
+            )
+        else:
+            iid = self.tree.insert('', 'end', text=str(len(self.solutions)+1), values=('', '', '', '', sol.err))
+        self.solutions.append(sol)
+        self.solution_ids.append(iid)
 
 
 app = App(g_st, g_en, g_div, g_eps)
