@@ -29,6 +29,7 @@ DELTA_THRESHOLD = (g_en - g_st) / X_CHANGE_REDRAW_COEF  # Изменение x �
 # DEFAULT_EXPRESSION = '8*x**4-5*(x-0.1)+1'
 DEFAULT_EXPRESSION = 'np.sin(x)'
 LOG_BASE = 5
+MAX_LINE_SPACE_SIZE = 4000
 
 
 # Класс оборачивающий метод и следящий за тем что бы внутренний метод не вызывался чаще через t миллисекунд
@@ -53,6 +54,7 @@ class Debouncer:
 
 class App(Tk):
     STEP_MODE: IntVar  # Пошаговое проигрывание анимации.
+    SHOW_INFLECTION_POINTS: IntVar
 
     started = False  # Мы начали искать корни, в это время нельзя менять менять уравнение.
     paused = False  # Пауза для анимации.
@@ -74,6 +76,8 @@ class App(Tk):
     plots: List[Line2D] = []
     h_lines: List[Line2D] = []  # Горизонтальные линии
     main_plot: any = None
+    deriv_plot: any = None
+    inflection_points: any = None
 
     # Список решений
     solutions: List[Solution] = []
@@ -176,9 +180,9 @@ class App(Tk):
         Entry(self.frame, textvariable=divs).grid(column=1, row=6, sticky='EW')
 
         self.frame.rowconfigure(7, minsize=25)
-        self.lin_space_label = Label(self.frame, text=f'lin_space_size: {self.lin_space_size}')
+        self.lin_space_label = Label(self.frame, text=f'Количество точек графика: {self.lin_space_size}')
         self.lin_space_label.grid(column=0, row=8, columnspan=2, sticky='W')
-        w = Scale(self.frame, from_=math.log(5, LOG_BASE), to=math.log(1000, LOG_BASE), resolution=0.1/LOG_BASE, orient=HORIZONTAL, variable=lin_space_var)
+        w = Scale(self.frame, from_=math.log(5, LOG_BASE), to=math.log(MAX_LINE_SPACE_SIZE, LOG_BASE), resolution=0.1/LOG_BASE, orient=HORIZONTAL, variable=lin_space_var)
         w.grid(column=0, row=9, columnspan=2, sticky='EW')
 
         self.tree = Treeview(self.frame)
@@ -199,10 +203,14 @@ class App(Tk):
         self.tree.grid(column=0, row=10, columnspan=2, sticky='EWSN')
 
         self.STEP_MODE = IntVar(self, value=0)
+        self.SHOW_INFLECTION_POINTS = IntVar(self, value=1)
+        self.SHOW_INFLECTION_POINTS.trace('w', lambda *_args: self.redraw_main_plot(True))
         Checkbutton(self.frame, text='Пошаговый режим', variable=self.STEP_MODE).grid(column=0, row=11, sticky='WS')
+        Checkbutton(self.frame, text='Показывать точка перегиба', variable=self.SHOW_INFLECTION_POINTS)\
+            .grid(column=0, row=12, sticky='WS')
 
     def modify_lin_space_size_callback(self, value, callback):
-        self.lin_space_label.configure(text=f'lin_space_size: {round(LOG_BASE**value)}')
+        self.lin_space_label.configure(text=f'Количество точек графика: {round(LOG_BASE**value)}')
         callback(value)
 
     def modify_lin_space_size(self, size):
@@ -215,7 +223,38 @@ class App(Tk):
 
         if self.main_plot:
             self.main_plot.remove()
+        if self.deriv_plot:
+            self.deriv_plot.remove()
+            self.deriv_plot = None
+        if self.inflection_points:
+            self.inflection_points.remove()
+            self.inflection_points = None
         v = self.f(self.lin_x)
+        if self.SHOW_INFLECTION_POINTS.get():
+            v2 = np.diff(v)
+            v2 = np.insert(v2, 0, v2[0] - (v2[1] - v2[0]))
+            v2 /= ((self.en - self.st) / self.lin_space_size)
+
+            v2 = np.diff(v2)
+            v2 = np.append(v2, v2[-1])
+            v2 /= ((self.en - self.st) / self.lin_space_size)
+            inflection_points_x = []
+            inflection_points_y = []
+            for i in range(1, len(v2)):
+                if v2[i-1] * v2[i] <= 0:
+                    if v[i-1] == 0:
+                        continue
+                    n = i - 1 if v2[i-1] < v2[i] else i
+                    x = self.st + (self.en - self.st) / self.lin_space_size * n
+                    y = self.f(x)
+
+                    inflection_points_x.append(x)
+                    inflection_points_y.append(y)
+
+            self.inflection_points = self.ax.scatter(inflection_points_x, inflection_points_y, 80, marker='x', color='violet')
+
+            self.deriv_plot = self.ax.plot(self.lin_x, v2, label="f''(x)", color='tab:green')[0]
+
         self.main_plot = self.ax.plot(self.lin_x, v, label='f(x)', color='tab:blue')[0]
         mx_y = max(v)
         mn_y = min(v)
