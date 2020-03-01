@@ -27,6 +27,7 @@ g_div = 9
 ITER_LIMIT = 10_000  # Ограничение по числу итераций.
 DELTA_THRESHOLD = (g_en - g_st) / X_CHANGE_REDRAW_COEF  # Изменение x при котором вызывается перерисовка.
 # DEFAULT_EXPRESSION = '8*x**4-5*(x-0.1)+1'
+# DEFAULT_EXPRESSION = '10*x**3-10*(x-0.1)+1'
 DEFAULT_EXPRESSION = 'np.sin(x)'
 LOG_BASE = 5
 MAX_LINE_SPACE_SIZE = 4000
@@ -229,39 +230,44 @@ class App(Tk):
         if self.inflection_points:
             self.inflection_points.remove()
             self.inflection_points = None
+
         v = self.f(self.lin_x)
+        self.main_plot = self.ax.plot(self.lin_x, v, label='f(x)', color='tab:blue')[0]
+
         if self.SHOW_INFLECTION_POINTS.get():
             v2 = np.diff(v)
             v2 = np.insert(v2, 0, v2[0] - (v2[1] - v2[0]))
             v2 /= ((self.en - self.st) / self.lin_space_size)
 
             v2 = np.diff(v2)
-            v2 = np.append(v2, v2[-1])
-            v2 /= ((self.en - self.st) / self.lin_space_size)
-            inflection_points_x = []
-            inflection_points_y = []
-            for i in range(1, len(v2)):
-                if v2[i-1] * v2[i] <= 0:
-                    if v[i-1] == 0:
-                        continue
-                    n = i - 1 if v2[i-1] < v2[i] else i
-                    x = self.st + (self.en - self.st) / self.lin_space_size * n
-                    y = self.f(x)
+            second_derivative_is_zero = all([x < self.eps for x in v2])
+            if not second_derivative_is_zero:
+                v2 = np.append(v2, v2[-1])
+                v2 /= ((self.en - self.st) / self.lin_space_size)
+                inflection_points_x = []
+                inflection_points_y = []
+                for i in range(1, len(v2)):
+                    if v2[i-1] * v2[i] <= 0:
+                        if v[i-1] == 0:
+                            continue
+                        n = i - 1 if v2[i-1] < v2[i] else i
+                        x = self.st + (self.en - self.st) / self.lin_space_size * n
+                        y = self.f(x)
 
-                    inflection_points_x.append(x)
-                    inflection_points_y.append(y)
+                        inflection_points_x.append(x)
+                        inflection_points_y.append(y)
 
-            self.inflection_points = self.ax.scatter(inflection_points_x, inflection_points_y, 80, marker='x', color='violet')
+                self.inflection_points = self.ax.scatter(inflection_points_x, inflection_points_y, 80, marker='x', color='violet')
 
-            self.deriv_plot = self.ax.plot(self.lin_x, v2, label="f''(x)", color='tab:green')[0]
+                self.deriv_plot = self.ax.plot(self.lin_x, v2, label="f''(x)", color='tab:green')[0]
 
-        self.main_plot = self.ax.plot(self.lin_x, v, label='f(x)', color='tab:blue')[0]
         mx_y = max(v)
         mn_y = min(v)
         m = (mx_y - mn_y) / 50
         dx = abs(self.en - self.st)*0.05
         self.ax.set_ylim(mn_y - m, mx_y + m)
         self.ax.set_xlim(self.st-dx, self.en+dx)
+
         if draw:
             self.fagg.draw()
 
