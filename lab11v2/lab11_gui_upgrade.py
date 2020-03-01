@@ -304,8 +304,8 @@ class App(Tk):
             self.cached_function = eval('lambda x: ' + value)
             self.reset()
         except Exception as e:
-            traceback.print_exc()
-            print(e)
+            # traceback.print_exc()
+            # print(e)
             pass
 
     def params_input(self, value, var_name):
