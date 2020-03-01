@@ -3,6 +3,8 @@
 # Программа вычисляет корни функции на заданном интервале
 # с определённым шагом разбиений методом хорд и выводит таблицу корней.
 import traceback
+
+
 from tkinter.ttk import Treeview
 from typing import Callable, List
 
@@ -262,7 +264,9 @@ class App(Tk):
         try:
             self.cached_function = eval('lambda x: ' + value)
             self.reset()
-        except Exception:
+        except Exception as e:
+            traceback.print_exc()
+            print(e)
             pass
 
     def params_input(self, value, var_name):
@@ -270,7 +274,8 @@ class App(Tk):
         self.reset()
 
     def reset(self):
-        self.after_cancel(self.after_job_id)
+        if self.after_job_id:
+            self.after_cancel(self.after_job_id)
         self.started = False
         self.done = False
         self.tree.delete(*self.solution_ids)
